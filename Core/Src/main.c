@@ -24,6 +24,9 @@
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
 
+#include <string.h>
+#include <stdio.h>
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -48,6 +51,10 @@ TIM_HandleTypeDef htim3;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
+
+char uart_msg[300];
+
+uint16_t PomiarADC_motor_trimmer;
 
 /* USER CODE END PV */
 
@@ -99,12 +106,54 @@ int main(void)
   MX_ADC3_Init();
   /* USER CODE BEGIN 2 */
 
+  // start adc to get trimmer motor control
+  HAL_ADC_Start(&hadc3);
+
+  // start pwm motor first direction
+  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
+
+  // start pwm motor reverse direction
+  HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_4);
+
+  // set defult duty value
+  TIM3->CCR3 = 500;
+  TIM3->CCR4 = 500;
+
+
   /* USER CODE END 2 */
 
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
   while (1)
   {
+	  if(HAL_ADC_PollForConversion(&hadc3, 10) == HAL_OK){
+
+		  PomiarADC_motor_trimmer = HAL_ADC_GetValue(&hadc3);
+		  HAL_ADC_Start(&hadc3);
+
+		  sprintf(uart_msg, "Pomiar adc: %d\r\n", PomiarADC_motor_trimmer);
+		  HAL_UART_Transmit(&huart2, (uint8_t*) uart_msg, strlen(uart_msg), 10);
+
+		  if(PomiarADC_motor_trimmer <= 2048){ // control pwm first direction
+
+			  TIM3->CCR4 = 0;
+
+			  TIM3->CCR3 = ((float)PomiarADC_motor_trimmer/2048.0)*10000.0;
+
+		  }else{ // control pwm reverse direction
+
+			  TIM3->CCR3 = 0;
+
+			  PomiarADC_motor_trimmer -= 2049;
+			  TIM3->CCR4 = ((float)PomiarADC_motor_trimmer/2048.0)*10000.0;
+
+		  }
+
+
+	  }
+
+	  HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
