@@ -26,6 +26,8 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <math.h>
+#include <stdlib.h>
 
 /* USER CODE END Includes */
 
@@ -44,6 +46,7 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
+ADC_HandleTypeDef hadc2;
 ADC_HandleTypeDef hadc3;
 
 TIM_HandleTypeDef htim3;
@@ -55,6 +58,7 @@ UART_HandleTypeDef huart2;
 char uart_msg[300];
 
 uint16_t PomiarADC_motor_trimmer;
+uint16_t PomiarADC_Servo_potentiometer;
 
 /* USER CODE END PV */
 
@@ -63,6 +67,7 @@ void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_USART2_UART_Init(void);
 static void MX_TIM3_Init(void);
+static void MX_ADC2_Init(void);
 static void MX_ADC3_Init(void);
 /* USER CODE BEGIN PFP */
 
@@ -103,11 +108,15 @@ int main(void)
   MX_GPIO_Init();
   MX_USART2_UART_Init();
   MX_TIM3_Init();
+  MX_ADC2_Init();
   MX_ADC3_Init();
   /* USER CODE BEGIN 2 */
 
   // start adc to get trimmer motor control
   HAL_ADC_Start(&hadc3);
+
+  // potentiometer servo adc start
+  HAL_ADC_Start(&hadc2);
 
   // start pwm motor first direction
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_3);
@@ -116,8 +125,8 @@ int main(void)
   HAL_TIM_PWM_Start(&htim3, TIM_CHANNEL_4);
 
   // set defult duty value
-  TIM3->CCR3 = 500;
-  TIM3->CCR4 = 500;
+  TIM3->CCR3 = 0;
+  TIM3->CCR4 = 0;
 
 
   /* USER CODE END 2 */
@@ -126,33 +135,95 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  if(HAL_ADC_PollForConversion(&hadc3, 10) == HAL_OK){
+	  // poll for adc servo potentiometer
+	  if(HAL_ADC_PollForConversion(&hadc2, 10) == HAL_OK){
 
-		  PomiarADC_motor_trimmer = HAL_ADC_GetValue(&hadc3);
-		  HAL_ADC_Start(&hadc3);
+		  // get servo position form servo potentiometer
+		  PomiarADC_Servo_potentiometer = HAL_ADC_GetValue(&hadc2);
+		  HAL_ADC_Start(&hadc2);
 
-		  sprintf(uart_msg, "Pomiar adc: %d\r\n", PomiarADC_motor_trimmer);
-		  HAL_UART_Transmit(&huart2, (uint8_t*) uart_msg, strlen(uart_msg), 10);
+		  // calculate reached angle
+		  uint16_t reached_servo_angle = 0;
+		  reached_servo_angle = 180.0*(((float)PomiarADC_Servo_potentiometer-300.0)/3350.0);
 
-		  if(PomiarADC_motor_trimmer <= 2048){ // control pwm first direction
 
-			  TIM3->CCR4 = 0;
+//		  // check if we are in range of servo motion
+//		  if((PomiarADC_Servo_potentiometer < 300) || (PomiarADC_Servo_potentiometer > 3650)){
+//
+//			  sprintf(uart_msg, "Servo ERROR!!!\r\n");
+//			  HAL_UART_Transmit(&huart2, (uint8_t*) uart_msg, strlen(uart_msg), 10);
+//
+//			  // stop servo motor
+//			  TIM3->CCR4 = 0;
+//			  TIM3->CCR3 = 0;
+//
+//
+//			  continue;
+//
+//		  }
 
-			  TIM3->CCR3 = ((float)PomiarADC_motor_trimmer/2048.0)*10000.0;
 
-		  }else{ // control pwm reverse direction
+		  // poll for adc adc control trimmer value
+		  if (HAL_ADC_PollForConversion(&hadc3, 10) == HAL_OK) {
 
-			  TIM3->CCR3 = 0;
+				// get control trimmer adc value
+				PomiarADC_motor_trimmer = HAL_ADC_GetValue(&hadc3);
+				HAL_ADC_Start(&hadc3);
 
-			  PomiarADC_motor_trimmer -= 2049;
-			  TIM3->CCR4 = ((float)PomiarADC_motor_trimmer/2048.0)*10000.0;
+				uint16_t set_servo_angle = 0; // 0 - 180 deg
+				set_servo_angle = 180.0 * ((float)PomiarADC_motor_trimmer/4095.0);
 
-		  }
+
+
+//				sprintf(uart_msg, "Servo reached angle: %d | Trimmer set angle: %d\r\n", reached_servo_angle, set_servo_angle);
+//			    HAL_UART_Transmit(&huart2, (uint8_t*) uart_msg, strlen(uart_msg), 10);
+
+			    uint16_t gain = 1000;
+
+			    int16_t e = 0;
+			    int16_t sterowanie = 0;
+
+			    int32_t e_sum = 0;
+//			    int32_t e_last = 0;
+
+			    const float Kp = 2.71;
+			    const float Ki = 27.1;
+
+			    // closed loop control
+				if (set_servo_angle != reached_servo_angle) {
+
+					// calculate uchyb
+					e = (set_servo_angle - reached_servo_angle);
+
+//					e_sum += e;
+
+					sterowanie = gain * e;
+
+					sprintf(uart_msg, "%d\t%d\t%d\r\n", reached_servo_angle, set_servo_angle, sterowanie);
+					HAL_UART_Transmit(&huart2, (uint8_t*) uart_msg, strlen(uart_msg), 10);
+
+
+
+					if (sterowanie > 0) {
+						TIM3->CCR3 = 0;
+						TIM3->CCR4 = abs(sterowanie);
+					} else if (sterowanie < 0 ) {
+						TIM3->CCR3 = abs(sterowanie);
+						TIM3->CCR4 = 0;
+					}
+
+				}else{
+					TIM3->CCR3 = 0;
+					TIM3->CCR4 = 0;
+				}
+
+			}
 
 
 	  }
 
 	  HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+	  HAL_Delay(1);
 
     /* USER CODE END WHILE */
 
@@ -209,6 +280,56 @@ void SystemClock_Config(void)
   {
     Error_Handler();
   }
+}
+
+/**
+  * @brief ADC2 Initialization Function
+  * @param None
+  * @retval None
+  */
+static void MX_ADC2_Init(void)
+{
+
+  /* USER CODE BEGIN ADC2_Init 0 */
+
+  /* USER CODE END ADC2_Init 0 */
+
+  ADC_ChannelConfTypeDef sConfig = {0};
+
+  /* USER CODE BEGIN ADC2_Init 1 */
+
+  /* USER CODE END ADC2_Init 1 */
+  /** Configure the global features of the ADC (Clock, Resolution, Data Alignment and number of conversion) 
+  */
+  hadc2.Instance = ADC2;
+  hadc2.Init.ClockPrescaler = ADC_CLOCK_SYNC_PCLK_DIV8;
+  hadc2.Init.Resolution = ADC_RESOLUTION_12B;
+  hadc2.Init.ScanConvMode = DISABLE;
+  hadc2.Init.ContinuousConvMode = DISABLE;
+  hadc2.Init.DiscontinuousConvMode = DISABLE;
+  hadc2.Init.ExternalTrigConvEdge = ADC_EXTERNALTRIGCONVEDGE_NONE;
+  hadc2.Init.ExternalTrigConv = ADC_SOFTWARE_START;
+  hadc2.Init.DataAlign = ADC_DATAALIGN_RIGHT;
+  hadc2.Init.NbrOfConversion = 1;
+  hadc2.Init.DMAContinuousRequests = DISABLE;
+  hadc2.Init.EOCSelection = ADC_EOC_SINGLE_CONV;
+  if (HAL_ADC_Init(&hadc2) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /** Configure for the selected ADC regular channel its corresponding rank in the sequencer and its sample time. 
+  */
+  sConfig.Channel = ADC_CHANNEL_10;
+  sConfig.Rank = 1;
+  sConfig.SamplingTime = ADC_SAMPLETIME_480CYCLES;
+  if (HAL_ADC_ConfigChannel(&hadc2, &sConfig) != HAL_OK)
+  {
+    Error_Handler();
+  }
+  /* USER CODE BEGIN ADC2_Init 2 */
+
+  /* USER CODE END ADC2_Init 2 */
+
 }
 
 /**
