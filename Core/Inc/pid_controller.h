@@ -309,8 +309,7 @@ extern void PIDSampleTimeSet(PIDControl *pid, float sampleTimeSeconds);
 // Returns:
 //      Nothing.
 // 
-inline void 
-PIDSetpointSet(PIDControl *pid, float setpoint) { pid->setpoint = setpoint; }
+static void PIDSetpointSet(PIDControl *pid, float setpoint) { pid->setpoint = setpoint; }
 
 // 
 // PID Input Set
@@ -323,8 +322,7 @@ PIDSetpointSet(PIDControl *pid, float setpoint) { pid->setpoint = setpoint; }
 // Returns:
 //      Nothing.
 // 
-inline void 
-PIDInputSet(PIDControl *pid, float input) { pid->input = input; }
+static void PIDInputSet(PIDControl *pid, float input) { pid->input = input; }
 
 // 
 // PID Output Get
@@ -336,8 +334,7 @@ PIDInputSet(PIDControl *pid, float input) { pid->input = input; }
 // Returns:
 //      The output of the specific PID controller.
 // 
-inline float 
-PIDOutputGet(PIDControl *pid) { return pid->output; }
+static float PIDOutputGet(PIDControl *pid) { return pid->output; }
 
 // 
 // PID Proportional Gain Constant Get

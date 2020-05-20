@@ -29,6 +29,8 @@
 #include <math.h>
 #include <stdlib.h>
 
+#include "pid_controller.h"
+
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -59,6 +61,13 @@ char uart_msg[300];
 
 uint16_t PomiarADC_motor_trimmer;
 uint16_t PomiarADC_Servo_potentiometer;
+
+// set and reached servo angle variable
+uint16_t set_servo_angle = 0; // 0 - 180 deg
+uint16_t reached_servo_angle = 0;
+
+// pid controller struct
+PIDControl pid_controller;
 
 /* USER CODE END PV */
 
@@ -135,17 +144,17 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-	  // poll for adc servo potentiometer
-	  if(HAL_ADC_PollForConversion(&hadc2, 10) == HAL_OK){
+	    // poll for adc servo potentiometer
+		if (HAL_ADC_PollForConversion(&hadc2, 10) == HAL_OK) {
 
-		  // get servo position form servo potentiometer
-		  PomiarADC_Servo_potentiometer = HAL_ADC_GetValue(&hadc2);
-		  HAL_ADC_Start(&hadc2);
+			// get servo position form servo potentiometer
+			PomiarADC_Servo_potentiometer = HAL_ADC_GetValue(&hadc2);
+			HAL_ADC_Start(&hadc2);
 
-		  // calculate reached angle
-		  uint16_t reached_servo_angle = 0;
-		  reached_servo_angle = 180.0*(((float)PomiarADC_Servo_potentiometer-300.0)/3350.0);
+			// calculate reached angle
+			reached_servo_angle = 180.0 * (((float) PomiarADC_Servo_potentiometer - 300.0) / 3350.0);
 
+		}
 
 //		  // check if we are in range of servo motion
 //		  if((PomiarADC_Servo_potentiometer < 300) || (PomiarADC_Servo_potentiometer > 3650)){
@@ -162,68 +171,82 @@ int main(void)
 //
 //		  }
 
+	    // poll for adc adc control trimmer value
+		if (HAL_ADC_PollForConversion(&hadc3, 10) == HAL_OK) {
 
-		  // poll for adc adc control trimmer value
-		  if (HAL_ADC_PollForConversion(&hadc3, 10) == HAL_OK) {
+			// get control trimmer adc value
+			PomiarADC_motor_trimmer = HAL_ADC_GetValue(&hadc3);
+			HAL_ADC_Start(&hadc3);
 
-				// get control trimmer adc value
-				PomiarADC_motor_trimmer = HAL_ADC_GetValue(&hadc3);
-				HAL_ADC_Start(&hadc3);
-
-				uint16_t set_servo_angle = 0; // 0 - 180 deg
-				set_servo_angle = 180.0 * ((float)PomiarADC_motor_trimmer/4095.0);
-
-
+			set_servo_angle = 180.0 * ((float) PomiarADC_motor_trimmer / 4095.0);
 
 //				sprintf(uart_msg, "Servo reached angle: %d | Trimmer set angle: %d\r\n", reached_servo_angle, set_servo_angle);
 //			    HAL_UART_Transmit(&huart2, (uint8_t*) uart_msg, strlen(uart_msg), 10);
 
-			    uint16_t gain = 1000;
+		}
 
-			    int16_t e = 0;
-			    int16_t sterowanie = 0;
+		/**************** PID controller ****************************/
 
-			    int32_t e_sum = 0;
-//			    int32_t e_last = 0;
-
-			    const float Kp = 2.71;
-			    const float Ki = 27.1;
-
-			    // closed loop control
-				if (set_servo_angle != reached_servo_angle) {
-
-					// calculate uchyb
-					e = (set_servo_angle - reached_servo_angle);
-
-//					e_sum += e;
-
-					sterowanie = gain * e;
-
-					sprintf(uart_msg, "%d\t%d\t%d\r\n", reached_servo_angle, set_servo_angle, sterowanie);
-					HAL_UART_Transmit(&huart2, (uint8_t*) uart_msg, strlen(uart_msg), 10);
+		// init pid controller
+		PIDInit(&pid_controller, 2.71, 27.1, 0, 0.001, -10000, 10000, AUTOMATIC, DIRECT);
 
 
+		// pid controller implementation
+		float gain = 1000;
 
-					if (sterowanie > 0) {
-						TIM3->CCR3 = 0;
-						TIM3->CCR4 = abs(sterowanie);
-					} else if (sterowanie < 0 ) {
-						TIM3->CCR3 = abs(sterowanie);
-						TIM3->CCR4 = 0;
-					}
+		int16_t e = 0; // uchyb
+		float sterowanie = 0; // wartosc wypelnienia pwm do sterowania
 
-				}else{
-					TIM3->CCR3 = 0;
-					TIM3->CCR4 = 0;
-				}
+		const float Kp = 2.71;
+		const float Ki = 27.1;
 
+		// closed loop control
+		if (set_servo_angle != reached_servo_angle) {
+
+			// calculate uchyb
+//			e = (set_servo_angle - reached_servo_angle);
+
+//			sterowanie = gain * e; // proste sterowanie wzmocnieniem
+
+			// set set value
+			PIDSetpointSet(&pid_controller, (float)set_servo_angle);
+
+			// set reached servo angle
+			PIDInputSet(&pid_controller, reached_servo_angle);
+
+			//compute pid control value
+			PIDCompute(&pid_controller);
+
+			// get pid control value
+			float pid_control_value = PIDOutputGet(&pid_controller);
+
+			sterowanie = gain*pid_control_value; // proste sterowanie wzmocnieniem
+
+			sprintf(uart_msg, "%d\t%d\t%f\r\n", reached_servo_angle, set_servo_angle, sterowanie);
+			HAL_UART_Transmit(&huart2, (uint8_t*) uart_msg, strlen(uart_msg), 10);
+
+			if (sterowanie > 0) {
+				TIM3->CCR3 = 0;
+				if(abs(sterowanie) > 10000) { sterowanie = 10000; }
+				TIM3->CCR4 = abs(sterowanie);
+			} else if (sterowanie < 0) {
+				if(abs(sterowanie) > 10000) { sterowanie = 10000; }
+				TIM3->CCR3 = abs(sterowanie);
+				TIM3->CCR4 = 0;
 			}
 
+		} else {
+			TIM3->CCR3 = 0;
+			TIM3->CCR4 = 0;
+		}
 
-	  }
+		/**************** PID controller ****************************/
 
-	  HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
-	  HAL_Delay(1);
+
+	    HAL_GPIO_TogglePin(LD2_GPIO_Port, LD2_Pin);
+
+	    // control time interval
+		HAL_Delay(1);
 
     /* USER CODE END WHILE */
 
