@@ -212,7 +212,7 @@ int main(void)
 			PIDSetpointSet(&pid_controller, (float)set_servo_angle);
 
 			// set reached servo angle
-			PIDInputSet(&pid_controller, reached_servo_angle);
+			PIDInputSet(&pid_controller, (float)reached_servo_angle);
 
 			//compute pid control value
 			PIDCompute(&pid_controller);

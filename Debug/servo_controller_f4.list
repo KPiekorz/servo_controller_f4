@@ -1587,7 +1587,7 @@ int main(void)
  80011a8:	f7ff ff0e 	bl	8000fc8 <PIDSetpointSet>
 
 			// set reached servo angle
-			PIDInputSet(&pid_controller, reached_servo_angle);
+			PIDInputSet(&pid_controller, (float)reached_servo_angle);
  80011ac:	4b54      	ldr	r3, [pc, #336]	; (8001300 <main+0x2d8>)
  80011ae:	881b      	ldrh	r3, [r3, #0]
  80011b0:	ee07 3a90 	vmov	s15, r3
